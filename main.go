@@ -41,6 +41,10 @@ func verifyName(name string) bool {
 	//	return false
 	//}
 
+	if strings.HasSuffix(name, ".") {
+		name = name[:len(name)-1]
+	}
+
 	list, err := Client.ContainerList(context.Background(), types.ContainerListOptions{})
 
 	if err != nil {

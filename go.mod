@@ -3,7 +3,7 @@ module main
 go 1.20
 
 require (
-	github.com/docker/docker v24.0.0+incompatible
+	github.com/docker/docker v23.0.4+incompatible
 	github.com/miekg/dns v1.1.53
 )
 
