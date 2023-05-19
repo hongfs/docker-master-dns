@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -35,13 +36,7 @@ func init() {
 }
 
 func verifyName(name string) bool {
-	log.Println("验证名称", name)
-
-	//re := regexp.MustCompile(`^[a-f0-9]{12}\.$`)
-	//
-	//if re.MatchString(name) {
-	//	return false
-	//}
+	re := regexp.MustCompile(`^[a-f0-9]{12}\$`)
 
 	if strings.HasSuffix(name, ".") {
 		name = name[:len(name)-1]
@@ -57,6 +52,10 @@ func verifyName(name string) bool {
 	for _, container := range list {
 		if container.Status != "running" {
 			continue
+		}
+
+		if re.MatchString(name) && strings.HasPrefix(container.ID, name) {
+			return true
 		}
 
 		if container.ID == name {
