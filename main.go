@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 )
 
@@ -33,11 +32,11 @@ func init() {
 	if MasterIP == "" {
 		panic("MASTER_IP 环境变量未设置")
 	}
+
+	log.Printf("MasterIP: %s\n", MasterIP)
 }
 
 func verifyName(name string) bool {
-	re := regexp.MustCompile(`^[a-f0-9]{12}\$`)
-
 	if strings.HasSuffix(name, ".") {
 		name = name[:len(name)-1]
 	}
@@ -58,7 +57,7 @@ func verifyName(name string) bool {
 			continue
 		}
 
-		if re.MatchString(name) && strings.HasPrefix(container.ID, name) {
+		if strings.HasPrefix(container.ID, name) && len(name) >= 12 {
 			return true
 		}
 
@@ -91,9 +90,9 @@ func parseQuery(m *dns.Msg) {
 				if err == nil {
 					m.Answer = append(m.Answer, rr)
 					return
-				} else {
-					log.Println("NewRR 异常", err.Error())
 				}
+
+				log.Println("NewRR 异常", err.Error())
 			}
 		}
 
