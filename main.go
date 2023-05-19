@@ -35,6 +35,8 @@ func init() {
 }
 
 func verifyName(name string) bool {
+	log.Println("验证名称", name)
+
 	//re := regexp.MustCompile(`^[a-f0-9]{12}\.$`)
 	//
 	//if re.MatchString(name) {
@@ -53,7 +55,11 @@ func verifyName(name string) bool {
 	}
 
 	for _, container := range list {
-		if strings.HasPrefix(container.ID, name) {
+		if container.Status != "running" {
+			continue
+		}
+
+		if container.ID == name {
 			return true
 		}
 
