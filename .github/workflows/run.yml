@@ -1,0 +1,40 @@
+name: Build Docker image
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: |
+          cd $GITHUB_WORKSPACE
+
+          podman build --no-cache -t $GITHUB_REPOSITORY:$GITHUB_REF_NAME .
+          podman tag $GITHUB_REPOSITORY:$GITHUB_REF_NAME $REGISTRY/$GITHUB_REPOSITORY:$GITHUB_REF_NAME
+          podman push $REGISTRY/$GITHUB_REPOSITORY:$GITHUB_REF_NAME
