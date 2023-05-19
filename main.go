@@ -52,7 +52,7 @@ func verifyName(name string) bool {
 	for _, container := range list {
 		log.Printf("容器名称：%s, 容器ID：%s, 容器状态：%s\n", container.Names, container.ID, container.Status)
 
-		if strings.HasPrefix(container.Status, "Up ") {
+		if !strings.HasPrefix(container.Status, "Up ") {
 			continue
 		}
 
