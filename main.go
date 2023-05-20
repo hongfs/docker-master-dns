@@ -62,11 +62,24 @@ func verifyDockerName(name string) bool {
 			return true
 		}
 
-		if container.Names != nil {
-			for _, containerName := range container.Names {
-				// 容器自定义名称，是以 / 开头的。例如：/dns
-				if containerName[1:] == name {
-					return true
+		// 获取容器的详细信息
+		inspect, err := Client.ContainerInspect(context.Background(), container.ID)
+
+		if err != nil {
+			continue
+		}
+
+		if inspect.NetworkSettings.Networks == nil {
+			continue
+		}
+
+		// 判断容器的别名是否是 name
+		for _, network := range inspect.NetworkSettings.Networks {
+			if network.Aliases != nil {
+				for _, alias := range network.Aliases {
+					if alias == name {
+						return true
+					}
 				}
 			}
 		}
