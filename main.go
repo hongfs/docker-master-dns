@@ -157,7 +157,7 @@ func parseQuery(w dns.ResponseWriter, m *dns.Msg) {
 			if verifyDockerName(name) {
 				log.Println("符合容器记录", name, MasterIP)
 
-				rr, _ := dns.NewRR(fmt.Sprintf("%s %s %s", q.Name, dns.Type(q.Qtype).String(), MasterIP))
+				rr, _ := dns.NewRR(fmt.Sprintf("%s %s %s", q.Name, dns.Type(dns.TypeA).String(), MasterIP))
 
 				if rr != nil {
 					m.Answer = append(m.Answer, rr)
