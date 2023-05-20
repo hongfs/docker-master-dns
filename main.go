@@ -9,6 +9,7 @@ import (
 	"golang.org/x/net/context"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 var Client *client.Client
 
+// MasterIP 为主服务器 IP 地址
 var MasterIP = ""
 
 func init() {
@@ -36,11 +38,8 @@ func init() {
 	log.Printf("MasterIP: %s\n", MasterIP)
 }
 
-func verifyName(name string) bool {
-	if strings.HasSuffix(name, ".") {
-		name = name[:len(name)-1]
-	}
-
+// verifyDockerName 验证容器名称在 Master 上是否存在
+func verifyDockerName(name string) bool {
 	list, err := Client.ContainerList(context.Background(), types.ContainerListOptions{})
 
 	if err != nil {
@@ -49,14 +48,12 @@ func verifyName(name string) bool {
 	}
 
 	for _, container := range list {
-		log.Printf("容器名称：%s, 容器ID：%s, 容器状态：%s\n", container.Names, container.ID, container.Status)
-
+		// 过滤掉非运行中的容器
 		if !strings.HasPrefix(container.Status, "Up") {
-			log.Printf("容器 %s 状态异常，跳过\n", container.ID)
-
 			continue
 		}
 
+		// 判断是不是以容器 ID 开头的，容器 ID 是 64 位的，这里判断必须要大于 12 位（提升容错率）
 		if strings.HasPrefix(container.ID, name) && len(name) >= 12 {
 			return true
 		}
@@ -67,6 +64,7 @@ func verifyName(name string) bool {
 
 		if container.Names != nil {
 			for _, containerName := range container.Names {
+				// 容器自定义名称，是以 / 开头的。例如：/dns
 				if containerName[1:] == name {
 					return true
 				}
@@ -77,61 +75,124 @@ func verifyName(name string) bool {
 	return false
 }
 
-func parseQuery(m *dns.Msg) {
+// verifyLocalName 验证容器名称是否是本地容器
+// 这里的本地是请求 DNS 的客户端，名称只获取环境变量的设置，不考虑是否真实存在
+// 例如：LOCAL_DOCKER_NAMES=dns,nginx
+func verifyLocalName(name string) bool {
+	names := os.Getenv("LOCAL_DOCKER_NAMES")
+
+	if names == "" {
+		return false
+	}
+
+	for _, localName := range strings.Split(names, ",") {
+		if localName == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getDefaultRR 获取默认的 DNS 记录，这里使用了 AliDNS 的公共 DNS 服务
+func getDefaultRR(q dns.Question) ([]dns.RR, error) {
+	query := dns.Msg{}
+	query.SetQuestion(q.Name, q.Qtype)
+
+	msg, err := query.Pack()
+
+	if err != nil {
+		return nil, err
+	}
+
+	servers := [...]string{
+		"223.5.5.5", // 权重 90
+		"223.5.5.5",
+		"223.5.5.5",
+		"223.6.6.6", // 权重 30
+	}
+
+	server := servers[rand.Intn(len(servers))]
+
+	dnsUrl := fmt.Sprintf("https://%s/dns-query?dns=%s", server, base64.RawURLEncoding.EncodeToString(msg))
+
+	resp, err := http.Get(dnsUrl)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	response := &dns.Msg{}
+
+	err = response.Unpack(body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return response.Answer, nil
+}
+
+// parseQuery 解析 DNS 请求
+func parseQuery(w dns.ResponseWriter, m *dns.Msg) {
 	for _, q := range m.Question {
 		log.Printf("查询名称：%s, 查询类型：%d\n", q.Name, q.Qtype)
 
-		if q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA {
-			if verifyName(q.Name) {
-				log.Println("符合容器记录", q.Name, MasterIP)
+		name := q.Name
 
-				rr, err := dns.NewRR(fmt.Sprintf("%s A %s", q.Name, MasterIP))
+		// 去掉最后的 .
+		if strings.HasSuffix(name, ".") {
+			name = name[:len(name)-1]
+		}
 
-				if err == nil {
+		if len(name) > 0 && (q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA) {
+			if verifyDockerName(name) {
+				log.Println("符合容器记录", name, MasterIP)
+
+				rr, _ := dns.NewRR(fmt.Sprintf("%s %s %s", q.Name, dns.Type(q.Qtype).String(), MasterIP))
+
+				if rr != nil {
 					m.Answer = append(m.Answer, rr)
 					return
 				}
+			} else if verifyLocalName(q.Name) {
+				remoteAddr := strings.Split(w.RemoteAddr().String(), ":")[0]
 
-				log.Println("NewRR 异常", err.Error())
+				if strings.HasPrefix(remoteAddr, "[") {
+					remoteAddr = remoteAddr[1 : len(remoteAddr)-1]
+				}
+
+				rr, _ := dns.NewRR(fmt.Sprintf("%s %s %s", q.Name, dns.Type(q.Qtype).String(), remoteAddr))
+
+				if rr != nil {
+					m.Answer = append(m.Answer, rr)
+					return
+				}
 			}
 		}
 
-		query := dns.Msg{}
-		query.SetQuestion(q.Name, q.Qtype)
-
-		msg, _ := query.Pack()
-
-		resp, err := http.Get("https://223.5.5.5/dns-query?dns=" + base64.RawURLEncoding.EncodeToString(msg))
+		rr, err := getDefaultRR(q)
 
 		if err != nil {
-			log.Println("请求阿里云失败", err.Error())
+			log.Println("获取默认记录失败", err.Error())
 			return
 		}
 
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-
-		if err != nil {
-			log.Println("io.ReadAll 失败", err.Error())
-			return
-		}
-
-		response := &dns.Msg{}
-
-		err = response.Unpack(body)
-
-		if err != nil {
-			log.Println("Unpack 失败", err.Error())
-			return
-		}
-
-		m.Answer = append(m.Answer, response.Answer...)
+		m.Answer = append(m.Answer, rr...)
 
 		return
 	}
 }
 
+// handleDnsRequest 处理 DNS 请求
 func handleDnsRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
@@ -139,7 +200,7 @@ func handleDnsRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	switch r.Opcode {
 	case dns.OpcodeQuery:
-		parseQuery(m)
+		parseQuery(w, m)
 	}
 
 	w.WriteMsg(m)
